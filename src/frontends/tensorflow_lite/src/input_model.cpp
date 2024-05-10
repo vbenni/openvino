@@ -155,6 +155,18 @@ void InputModel::InputModelTFLiteImpl::load_model() {
                                                                  deq_data_fl);
                         constant->set_friendly_name(name);
                         m_tensor_values[name] = constant;
+                    } else if (name.find("transformer_feed_forward") != std::string::npos && place->get_element_type() == element::i8) {
+                        int size_int4 = place->get_size();
+			size_int4 = size_int4/2;
+			int8_t* quant_int4_data = (int8_t*)malloc(sizeof(int8_t) * size_int4);
+			for (int i = 0; i < size_int4 ; i++) {
+				quant_int4_data[i] = ((*((int8_t*) data + i*2 + 1) << 4) & 0xF0) +  (*((int8_t*) data + i*2) & 0x0F);
+			}
+                        auto constant = ov::op::v0::Constant::create(element::i4,
+                                                                 place->get_partial_shape().to_shape(),
+                                                                 quant_int4_data);
+                        constant->set_friendly_name(name);
+                    m_tensor_values[name] = constant;
                     }
                     else {
                         auto constant = ov::op::v0::Constant::create(place->get_element_type(),
@@ -470,4 +482,5 @@ std::vector<std::shared_ptr<InputModel>> InputModel::get_subgraphs() const {
 
 }  // namespace tensorflow_lite
 }  // namespace frontend
+
 }  // namespace ov
