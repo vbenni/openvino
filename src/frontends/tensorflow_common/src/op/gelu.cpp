@@ -5,6 +5,7 @@
 #include "openvino/op/gelu.hpp"
 
 #include "common_op_table.hpp"
+#include "openvino/opsets/opset10.hpp"
 
 using namespace std;
 using namespace ov;
