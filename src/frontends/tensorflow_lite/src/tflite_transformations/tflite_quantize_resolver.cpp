@@ -151,11 +151,12 @@ pass::TFLQuantizeReplacer::TFLQuantizeReplacer() {
             tfl_quantize->output(0).replace(output);
             return true;
         }
-	tfl_quantize->output(0).replace(output);
-        return true;
         if (in_type != element::f32) {
             output = make_shared<Convert>(output, element::f32);
+            output = std::make_shared<ov::opset10::Multiply>(output, scale_node);
         }
+        tfl_quantize->output(0).replace(output);
+        return true;
 
         auto levels = 1 << tfl_quantize->get_original_type().bitwidth();
         auto is_signed = tfl_quantize->get_original_type().is_signed();

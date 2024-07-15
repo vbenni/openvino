@@ -113,6 +113,7 @@ void InputModel::InputModelTFLiteImpl::load_model() {
     std::map<std::string, uint64_t> op_statistics;  // for telemetry
 
     m_op_places.reserve(m_graph_iterator->size());
+    int input_idx = -1;
     for (; !m_graph_iterator->is_end(); m_graph_iterator->next()) {
         const auto& decoder = m_graph_iterator->get_decoder();
 
@@ -120,6 +121,8 @@ void InputModel::InputModelTFLiteImpl::load_model() {
             auto tensor_place = decode_tensor_place(tensor_decoder->get_tensor_info(), m_input_model);
             tensor_place->set_input_index(tensor_decoder->get_input_idx());
             tensor_place->set_output_index(tensor_decoder->get_output_idx());
+            //std::cout << "--input idx: " << tensor_decoder->get_input_idx() << std::endl;
+            input_idx = tensor_decoder->get_input_idx();
             FRONT_END_GENERAL_CHECK(tensor_place->is_input() || tensor_place->is_output());
             auto name = tensor_place->get_names()[0];
             if (m_tensor_places.count(name) == 0) {
@@ -155,18 +158,30 @@ void InputModel::InputModelTFLiteImpl::load_model() {
                                                                  deq_data_fl);
                         constant->set_friendly_name(name);
                         m_tensor_values[name] = constant;
-                    } else if (name.find("transformer_feed_forward") != std::string::npos && place->get_element_type() == element::i8) {
+                    } else if ((name.find("transformer_feed_forward") != std::string::npos /*|| name.find("attention") != std::string::npos*/) && place->get_element_type() == element::i8) {
                         int size_int4 = place->get_size();
-			size_int4 = size_int4/2;
-			int8_t* quant_int4_data = (int8_t*)malloc(sizeof(int8_t) * size_int4);
-			for (int i = 0; i < size_int4 ; i++) {
-				quant_int4_data[i] = ((*((int8_t*) data + i*2 + 1) << 4) & 0xF0) +  (*((int8_t*) data + i*2) & 0x0F);
-			}
-                        auto constant = ov::op::v0::Constant::create(element::i4,
-                                                                 place->get_partial_shape().to_shape(),
-                                                                 quant_int4_data);
-                        constant->set_friendly_name(name);
-                    m_tensor_values[name] = constant;
+			            size_int4 = size_int4/2;
+			            int8_t* quant_int4_data = (int8_t*)malloc(sizeof(int8_t) * size_int4);
+			            for (int i = 0; i < size_int4 ; i++) {
+				            quant_int4_data[i] = ((*((int8_t*) data + i*2) << 4) & 0xF0) +  (*((int8_t*) data + i*2 + 1) & 0x0F);
+                            //std::cout << "int4: " << (int)quant_int4_data[i] << " int8: " << (int)*((int8_t*) data + i*2) << ", int8: " << (int) *((int8_t*) data + i*2 + 1) << std::endl;
+			            }
+                        // auto constant = ov::op::v0::Constant::create(element::i4,
+                        //                                          place->get_partial_shape().to_shape(),
+                        //                                          quant_int4_data);
+                        // auto shape_ = place->get_partial_shape().to_shape();
+                        // std:: cout << "--size int8--" << place->get_size() << std::endl;
+                        // std:: cout << "--size int4--" << size_int4 << std::endl;
+                        // std::cout << "shape: " << shape_[0] << " " << shape_[1] << std::endl;
+                        std::cout << "----------Creating weights as params-----------" << std::endl;
+                        input_idx++;
+                        std::stringstream sstm;
+                        sstm << "w_" << input_idx << ".bin";
+                        std::cout << "file name: " << sstm.str() << std::endl;
+                        std::ofstream bin_file(sstm.str(), std::ofstream::binary);
+                        bin_file.write((char*)quant_int4_data,sizeof(int8_t) * size_int4);
+                        place->set_input_index(input_idx);
+                        m_inputs.push_back(place);
                     }
                     else {
                         auto constant = ov::op::v0::Constant::create(place->get_element_type(),
@@ -174,7 +189,7 @@ void InputModel::InputModelTFLiteImpl::load_model() {
                                                                  data);
                     constant->set_friendly_name(name);
                     m_tensor_values[name] = constant;
-		    }
+		            }
                 } else if (place->get_partial_shape() == PartialShape{0}) {  // empty constant
                     auto constant = ov::op::v0::Constant::create(place->get_element_type(),
                                                                  place->get_partial_shape().to_shape(),
