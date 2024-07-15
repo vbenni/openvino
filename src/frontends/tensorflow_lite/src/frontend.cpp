@@ -197,6 +197,7 @@ void FrontEnd::translate_graph(const InputModel::Ptr& model,
     auto all_tensor_values = model_lite->get_tensor_values();
     auto all_tensor_places = model_lite->get_tensor_places();
 
+  
     for (auto& value : all_tensor_values) {
         auto& output = value.second;
         FRONT_END_GENERAL_CHECK(ov::is_type<ov::opset1::Constant>(output.get_node_shared_ptr()),
@@ -209,17 +210,39 @@ void FrontEnd::translate_graph(const InputModel::Ptr& model,
     // inputs
     ParameterVector parameters;
     parameters.reserve(model_lite->get_inputs().size());
+    std::cout << "model_lite inputs size :" << model_lite->get_inputs().size() << std::endl;
     for (const auto& input : model_lite->get_inputs()) {
         const auto& input_tensor = std::dynamic_pointer_cast<ov::frontend::tensorflow_lite::TensorLitePlace>(input);
         FRONT_END_GENERAL_CHECK(
             input_tensor != nullptr,
             "Inputs of ov::frontend::tensorflow_lite::InputModel must be TensorLitePlace instances");
         const auto name = input_tensor->get_names()[0];
-        auto parameter = std::make_shared<ov::opset1::Parameter>(ov::element::f32,
+        // std::cout << "frontend input: " << name << std::endl;
+        if ((name.find("transformer_feed_forward") != std::string::npos || name.find("softmax_feed_forward") != std::string::npos) && input_tensor->get_element_type() == element::i8)
+        {
+            std::cout << "frontend input: " << name << std::endl;
+            auto parameter = std::make_shared<ov::opset1::Parameter>(ov::element::i4,
                                                                  input_tensor->get_partial_shape());
-        parameter->set_friendly_name(name);
-        parameters.push_back(parameter);
-        all_tensor_values[name] = parameter->output(0);
+            parameter->set_friendly_name(name);
+            parameters.push_back(parameter);
+            all_tensor_values[name] = parameter->output(0);
+        }
+        else if ((name.find("attention") != std::string::npos) && input_tensor->get_element_type() == element::i8)
+        {
+            std::cout << "frontend input: " << name << std::endl;
+            auto parameter = std::make_shared<ov::opset1::Parameter>(ov::element::i8,
+                                                                 input_tensor->get_partial_shape());
+            parameter->set_friendly_name(name);
+            parameters.push_back(parameter);
+            all_tensor_values[name] = parameter->output(0);
+        }
+        else{
+            auto parameter = std::make_shared<ov::opset1::Parameter>(ov::element::f32,
+                                                                 input_tensor->get_partial_shape());
+            parameter->set_friendly_name(name);
+            parameters.push_back(parameter);
+            all_tensor_values[name] = parameter->output(0);
+        }
         input_tensor->translate(all_tensor_values[name], !no_conversion);
     }
 
@@ -234,6 +257,7 @@ void FrontEnd::translate_graph(const InputModel::Ptr& model,
                                     "Unknown tensor name: ",
                                     name,
                                     ".");
+            //std::cout << "frontend operations input: " << name << std::endl;
             inputs[i] = all_tensor_values[name];
         }
 
@@ -276,6 +300,9 @@ void FrontEnd::translate_graph(const InputModel::Ptr& model,
         if (!all_tensor_values.count(name)) {
             continue;
         }
+        //std::cout << "--output type-- " <<  tensor->get_element_type() << std::endl;
+        if  (tensor->get_element_type() == element::i8)
+             std::cout << "int8 here-----" << std::endl;
         const auto& output_value = all_tensor_values[name];
         const auto& result = std::make_shared<ov::opset1::Result>(output_value);
         auto input = result->output(0);
